@@ -24,21 +24,21 @@ SHARED_KEY = os.environ['AzureSentinelSharedKey']
 logAnalyticsUri = os.environ.get('logAnalyticsUri')
 LOG_TYPE = 'BoxEvents'
 # 現在時刻よりも何分前のデータまで確認するか (既定: 120 分)
-Delay_Minutes = os.environ.get('Delay_Minutes',120)
-Historical_Data_Days = os.environ.get('Historical_Data_Days',3)
+Delay_Minutes = os.environ.get('Delay_Minutes', 120)
+Historical_Data_Days = os.environ.get('Historical_Data_Days', 3)
 Delay_Minutes = int(Delay_Minutes)
 Historical_Data_Days = int(Historical_Data_Days)
 # 1 回の関数の実行で最大何分分のデータを取得するか (既定値: 60 分)
-Max_Period_Minutes = os.environ.get('Max_Period_Minutes',60)
+Max_Period_Minutes = os.environ.get('Max_Period_Minutes', 60)
 Max_Period_Minutes = int(Max_Period_Minutes)
-DryRun = os.environ.get('DryRun',True)
+DryRun = os.environ.get('DryRun', True)
 
 if ((logAnalyticsUri in (None, '') or str(logAnalyticsUri).isspace())):
     logAnalyticsUri = 'https://' + WORKSPACE_ID + '.ods.opinsights.azure.com'
 
 pattern = r"https:\/\/([\w\-]+)\.ods\.opinsights\.azure.([a-zA-Z\.]+)$"
-match = re.match(pattern,str(logAnalyticsUri))
-if(not match):
+match = re.match(pattern, str(logAnalyticsUri))
+if not match:
     raise Exception("Invalid Log Analytics Uri.")
 
 # interval of script execution
@@ -83,7 +83,6 @@ def process(config_dict: Any) -> bool:
         created_before = parse_datetime(str(created_after)) + datetime.timedelta(minutes=Max_Period_Minutes)
         logging.info('Backlog to process is more than than {} minutes. So changing created_before to {}. Remaining data will be processed during next invocation'.format(Max_Period_Minutes, created_before))
 
-
     logging.info('Script started. Getting events from created_before {}, created_after {}'.format(created_before, created_after))
 
     log_query = LogQuery(CLIENT_ID, CLIENT_SECRET, TENANT_ID, WORKSPACE_ID)
@@ -103,7 +102,7 @@ def process(config_dict: Any) -> bool:
                         found = True
                         if i != 0:
                             reservoir += results[:i]
-                        results = results[i+1:]
+                        results = results[i + 1:]
                         break
                 for row in reservoir:
                     if row[2] == event['event_id']:
@@ -127,23 +126,23 @@ def process(config_dict: Any) -> bool:
     return True
 
 
-def get_stream_pos_and_date_from(marker: StateManager) -> Tuple[int,datetime.datetime]:
+def get_stream_pos_and_date_from(marker: StateManager) -> Tuple[int, datetime.datetime]:
     def get_default_date_from() -> datetime.datetime:
-        date_from = datetime.datetime.utcnow() - datetime.timedelta(minutes=Historical_Data_Days*24*60)
+        date_from = datetime.datetime.utcnow() - datetime.timedelta(minutes=Historical_Data_Days * 24 * 60)
         date_from = date_from.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0).isoformat()
         return date_from
-    
+
     def get_token_from_maker(marker: StateManager) -> Tuple[str, datetime.datetime]:
         # ストレージアカウントの保存されたトークンと日付を取得
         token = 0
         last_event_date = None
         try:
-            token, last_event_date = marker.split(' ',1)
+            token, last_event_date = marker.split(' ', 1)
             last_event_date = parse_date(last_event_date).replace(tzinfo=datetime.timezone.utc)
         except Exception:
             pass
         return token, last_event_date
-            
+
     token, last_event_date = get_token_from_maker(marker)
     if last_event_date:
         date_from = last_event_date
@@ -172,6 +171,7 @@ class ExtendedEvents(Events):
         box_response = self._session.get(url, params=params)
         response = box_response.json().copy()
         return self.translator.translate(self._session, response_object=response)
+
 
 def get_events(config_dict, created_after=None, created_before=None, stream_position=0):
     logging.getLogger().setLevel(logging.WARNING)

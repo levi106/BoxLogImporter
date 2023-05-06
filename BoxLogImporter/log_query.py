@@ -2,6 +2,7 @@ import requests
 import datetime
 import logging
 
+
 class LogQuery:
     def __init__(self, client_id: str, client_secret: str, tenant_id: str, workspace_id: str):
         self.login_url = "https://login.microsoftonline.com/{tenant_id}/oauth2/token/".format(tenant_id=tenant_id)
@@ -43,7 +44,7 @@ class LogQuery:
         if self.expire_on > current_time:
             logging.info("No need to update auth token.")
             return
-        
+
         # https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/access-api#client-credentials-flow
         headers = {
             'content-type': 'application/x-www-form-urlencoded'
@@ -62,13 +63,12 @@ class LogQuery:
         else:
             if (response.status_code >= 200 and response.status_code <= 299):
                 r = response.json()
-                #logging.info('Status Code: {}'.format(response.status_code))
-                #logging.info('expires_in: {}'.format(r['expires_in']))
-                #logging.info('expires_on: {}'.format(r['expires_on']))
-                #ogging.info('access_token: {}'.format(r['access_token']))
+                # logging.info('Status Code: {}'.format(response.status_code))
+                # logging.info('expires_in: {}'.format(r['expires_in']))
+                # logging.info('expires_on: {}'.format(r['expires_on']))
+                # ogging.info('access_token: {}'.format(r['access_token']))
                 self.expire_on = int(r['expires_in']) + int(datetime.datetime.utcnow().timestamp())
                 self.access_token = '{} {}'.format(r['token_type'], r['access_token'])
-                #logging.info('{}: {}'.format(response.status_code, response.json()))
+                # logging.info('{}: {}'.format(response.status_code, response.json()))
             else:
                 logging.error("Authentication failed. Error code: {}".format(response.status_code))
-                
