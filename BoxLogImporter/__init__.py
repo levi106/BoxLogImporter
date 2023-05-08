@@ -110,7 +110,7 @@ def process(config_dict: Any) -> bool:
                         break
                 if not found:
                     missing_ids.append(event['event_id'])
-                    print('event_id: {}, created_at: {} not found.'.format(event['event_id'], event['created_at']))
+                    logging.info('event_id: {}, created_at: {} not found.'.format(event['event_id'], event['created_at']))
                     if not DryRun:
                         sentinel.send(event)
 
