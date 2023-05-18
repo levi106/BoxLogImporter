@@ -31,7 +31,11 @@ Historical_Data_Days = int(Historical_Data_Days)
 # 1 回の関数の実行で最大何分分のデータを取得するか (既定値: 60 分)
 Max_Period_Minutes = os.environ.get('Max_Period_Minutes', 60)
 Max_Period_Minutes = int(Max_Period_Minutes)
-DryRun = os.environ.get('DryRun', True)
+DryRun = os.environ.get('DryRun', 'True').lower() == 'true'
+# 1 度に取得する最大の行数 (既定値: 500)
+Max_Rows = os.environ.get('Max_Rows', 500)
+# 詳細のログを出力するかどうか (既定値: True)
+Verbose = os.environ.get('Verbose', 'True').lower() == 'true'
 
 if ((logAnalyticsUri in (None, '') or str(logAnalyticsUri).isspace())):
     logAnalyticsUri = 'https://' + WORKSPACE_ID + '.ods.opinsights.azure.com'
@@ -89,9 +93,16 @@ def process(config_dict: Any) -> bool:
     query = 'BoxEvents_CL | where created_at_t between(datetime(\'{}\')..datetime(\'{}\')) | project TimeGenerated, created_at_t, event_id_g'.format(created_after, created_before)
     results = log_query.query(query)
 
+    if Verbose:
+        logging.info('Log Analytics query result: rows={}'.format(len(results)))
+        if len(results) > 0:
+            logging.info('first event: event_id={}, created_at={}, TimeGenerated={}'.format(results[0][2], results[0][1], results[0][0]))
+            logging.info('last event: event_id={}, created_at={}, TimeGenerated={}'.format(results[-1][2], results[-1][1], results[-1][0]))
+
     sentinel = AzureSentinelConnector(workspace_id=WORKSPACE_ID, logAnalyticsUri=logAnalyticsUri, shared_key=SHARED_KEY, log_type=LOG_TYPE, queue_size=10000)
     with sentinel:
         reservoir = []
+        reservoir_match_count = 0
         missing_ids = []
         last_event_date = None
         for events, stream_position in get_events(config_dict, created_after, stream_position=stream_position):
@@ -101,12 +112,14 @@ def process(config_dict: Any) -> bool:
                     if row[2] == event['event_id']:
                         found = True
                         if i != 0:
+                            logging.info('copy {} rows to reservoir'.format(i))
                             reservoir += results[:i]
                         results = results[i + 1:]
                         break
                 for row in reservoir:
                     if row[2] == event['event_id']:
                         found = True
+                        reservoir_match_count += 1
                         break
                 if not found:
                     missing_ids.append(event['event_id'])
@@ -117,6 +130,9 @@ def process(config_dict: Any) -> bool:
             logging.getLogger().setLevel(logging.INFO)
             last_event_date = events[-1]['created_at'] if events else last_event_date
             logging.info('Processed {} events. Last event date: {}. {} events are not found in LA.'.format(len(events), last_event_date, len(missing_ids)))
+
+        if Verbose:
+            logging.info('reservoir length: {}, reservoir_match_count: {}'.format(len(reservoir), reservoir_match_count))
 
     if last_event_date:
         save_marker(state_manager, stream_position, last_event_date)
@@ -175,7 +191,7 @@ class ExtendedEvents(Events):
 
 def get_events(config_dict, created_after=None, created_before=None, stream_position=0):
     logging.getLogger().setLevel(logging.WARNING)
-    limit = 500
+    limit = Max_Rows
     config = JWTAuth.from_settings_dictionary(config_dict)
     client = Client(config)
     events_client = ExtendedEvents(client._session)
