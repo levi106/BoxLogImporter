@@ -32,8 +32,8 @@ Historical_Data_Days = int(Historical_Data_Days)
 Max_Period_Minutes = os.environ.get('Max_Period_Minutes', 60)
 Max_Period_Minutes = int(Max_Period_Minutes)
 DryRun = os.environ.get('DryRun', 'True').lower() == 'true'
-# 1 度に取得する最大の行数 (既定値: 500)
-Max_Rows = os.environ.get('Max_Rows', 500)
+# 1 度に取得する最大の行数 (既定値: 200)
+Max_Rows = os.environ.get('Max_Rows', 200)
 # 詳細のログを出力するかどうか (既定値: True)
 Verbose = os.environ.get('Verbose', 'True').lower() == 'true'
 
