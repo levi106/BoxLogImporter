@@ -42,9 +42,9 @@ if not match:
     raise Exception("Invalid Log Analytics Uri.")
 
 # interval of script execution
-SCRIPT_EXECUTION_INTERVAL_MINUTES = 10
+SCRIPT_EXECUTION_INTERVAL_MINUTES = os.environ.get('Script_Execution_Internal_Minutes', 10)
 # max azure function lifetime
-AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES = 6
+AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES = os.environ.get('Azure_Func_Max_Execution_Time_Minutes', 6)
 
 
 def main(mytimer: func.TimerRequest) -> None:
