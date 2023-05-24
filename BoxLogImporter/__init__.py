@@ -105,7 +105,7 @@ def process(config_dict: Any) -> bool:
         reservoir_match_count = 0
         missing_ids = []
         last_event_date = None
-        for events, stream_position in get_events(config_dict, created_after, stream_position=stream_position):
+        for events, stream_position in get_events(config_dict, created_after=created_after, created_before=created_before, stream_position=stream_position):
             for event in events:
                 found = False
                 for i, row in enumerate(results):
