@@ -11,10 +11,10 @@ from .log_query import LogQuery
 from dateutil.parser import parse as parse_date
 import logging
 import re
-from dateutil.parser import parse as parse_datetime
 from typing import Any, Tuple
 import azure.functions as func
 
+logger = logging.getLogger('BoxLogImporter')
 
 CLIENT_ID = os.environ['ClientId']
 CLIENT_SECRET = os.environ['ClientSecret']
@@ -54,7 +54,6 @@ AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES = os.environ.get('Azure_Func_Max_Execution
 def main(mytimer: func.TimerRequest) -> None:
     start_time = time.time()
     current_time = start_time
-    logging.getLogger().setLevel(logging.INFO)
     config_json = os.environ['BOX_CONFIG_JSON']
     config_dict = json.loads(config_json)
     while current_time - start_time < AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES * 60:
@@ -65,11 +64,10 @@ def main(mytimer: func.TimerRequest) -> None:
 
 
 def process(config_dict: Any) -> bool:
-    logging.getLogger().setLevel(logging.INFO)
-    logging.info(f'Parameters initialized are  WORKSPACE_ID: {WORKSPACE_ID} SHARED_KEY: ItsASecret logAnalyticsUri: {logAnalyticsUri} LOG_TYPE: {LOG_TYPE}  Delay_Minutes: {Delay_Minutes} Historical_Data_Days: {Historical_Data_Days} SCRIPT_EXECUTION_INTERVAL_MINUTES: {SCRIPT_EXECUTION_INTERVAL_MINUTES} AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES: {AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES} Max_Period_Minutes: {Max_Period_Minutes} ')
+    logger.info(f'Parameters initialized are  WORKSPACE_ID: {WORKSPACE_ID} SHARED_KEY: ItsASecret logAnalyticsUri: {logAnalyticsUri} LOG_TYPE: {LOG_TYPE}  Delay_Minutes: {Delay_Minutes} Historical_Data_Days: {Historical_Data_Days} SCRIPT_EXECUTION_INTERVAL_MINUTES: {SCRIPT_EXECUTION_INTERVAL_MINUTES} AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES: {AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES} Max_Period_Minutes: {Max_Period_Minutes} ')
 
     created_before = datetime.datetime.utcnow() - datetime.timedelta(minutes=Delay_Minutes)
-    created_before = created_before.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0).isoformat()
+    created_before = created_before.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0)
 
     file_storage_connection_string = os.environ['AzureWebJobsStorage']
     state_manager = StateManager(connection_string=file_storage_connection_string)
@@ -78,26 +76,26 @@ def process(config_dict: Any) -> bool:
         marker=state_manager.get()
     )
 
-    created_after = parse_datetime(str(created_after)) + datetime.timedelta(seconds=1)
+    created_after = created_after + datetime.timedelta(seconds=1)
 
-    if created_after > parse_datetime(created_before):
+    if created_after > created_before:
         return False
 
-    if parse_datetime(str(created_after)) + datetime.timedelta(minutes=Max_Period_Minutes) < parse_datetime(str(created_before)):
-        created_before = parse_datetime(str(created_after)) + datetime.timedelta(minutes=Max_Period_Minutes)
-        logging.info('Backlog to process is more than than {} minutes. So changing created_before to {}. Remaining data will be processed during next invocation'.format(Max_Period_Minutes, created_before))
+    if created_after + datetime.timedelta(minutes=Max_Period_Minutes) < created_before:
+        created_before = created_after + datetime.timedelta(minutes=Max_Period_Minutes)
+        logger.info('Backlog to process is more than than {} minutes. So changing created_before to {}. Remaining data will be processed during next invocation'.format(Max_Period_Minutes, created_before))
 
-    logging.info('Script started. Getting events from created_before {}, created_after {}'.format(created_before, created_after))
+    logger.info('Script started. Getting events from created_before {}, created_after {}'.format(created_before, created_after))
 
     log_query = LogQuery(CLIENT_ID, CLIENT_SECRET, TENANT_ID, WORKSPACE_ID)
     query = 'BoxEvents_CL | where created_at_t between(datetime(\'{}\')..datetime(\'{}\')) | project TimeGenerated, created_at_t, event_id_g'.format(created_after, created_before)
     results = log_query.query(query)
 
     if Verbose:
-        logging.info('Log Analytics query result: rows={}'.format(len(results)))
+        logger.info('Log Analytics query result: rows={}'.format(len(results)))
         if len(results) > 0:
-            logging.info('first event: event_id={}, created_at={}, TimeGenerated={}'.format(results[0][2], results[0][1], results[0][0]))
-            logging.info('last event: event_id={}, created_at={}, TimeGenerated={}'.format(results[-1][2], results[-1][1], results[-1][0]))
+            logger.info('first event: event_id={}, created_at={}, TimeGenerated={}'.format(results[0][2], results[0][1], results[0][0]))
+            logger.info('last event: event_id={}, created_at={}, TimeGenerated={}'.format(results[-1][2], results[-1][1], results[-1][0]))
 
     sentinel = AzureSentinelConnector(workspace_id=WORKSPACE_ID, logAnalyticsUri=logAnalyticsUri, shared_key=SHARED_KEY, log_type=LOG_TYPE, queue_size=10000)
     with sentinel:
@@ -112,7 +110,7 @@ def process(config_dict: Any) -> bool:
                     if row[2] == event['event_id']:
                         found = True
                         if i != 0:
-                            logging.info('copy {} rows to reservoir'.format(i))
+                            logger.info('copy {} rows to reservoir'.format(i))
                             reservoir += results[:i]
                         results = results[i + 1:]
                         break
@@ -123,16 +121,15 @@ def process(config_dict: Any) -> bool:
                         break
                 if not found:
                     missing_ids.append(event['event_id'])
-                    logging.info('event_id: {}, created_at: {} not found.'.format(event['event_id'], event['created_at']))
+                    logger.info('event_id: {}, created_at: {} not found.'.format(event['event_id'], event['created_at']))
                     if not DryRun:
                         sentinel.send(event)
 
-            logging.getLogger().setLevel(logging.INFO)
             last_event_date = events[-1]['created_at'] if events else last_event_date
-            logging.info('Processed {} events. Last event date: {}. {} events are not found in LA.'.format(len(events), last_event_date, len(missing_ids)))
+            logger.info('Processed {} events. Last event date: {}. {} events are not found in LA.'.format(len(events), last_event_date, len(missing_ids)))
 
         if Verbose:
-            logging.info('reservoir length: {}, reservoir_match_count: {}'.format(len(reservoir), reservoir_match_count))
+            logger.info('reservoir length: {}, reservoir_match_count: {}'.format(len(reservoir), reservoir_match_count))
 
     if last_event_date:
         save_marker(state_manager, stream_position, last_event_date)
@@ -145,7 +142,7 @@ def process(config_dict: Any) -> bool:
 def get_stream_pos_and_date_from(marker: StateManager) -> Tuple[int, datetime.datetime]:
     def get_default_date_from() -> datetime.datetime:
         date_from = datetime.datetime.utcnow() - datetime.timedelta(minutes=Historical_Data_Days * 24 * 60)
-        date_from = date_from.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0).isoformat()
+        date_from = date_from.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0)
         return date_from
 
     def get_token_from_maker(marker: StateManager) -> Tuple[str, datetime.datetime]:
@@ -169,8 +166,7 @@ def get_stream_pos_and_date_from(marker: StateManager) -> Tuple[int, datetime.da
 
 
 def save_marker(state_manager: StateManager, stream_position: int, last_event_date: str) -> None:
-    logging.getLogger().setLevel(logging.INFO)
-    logging.info('Saving last stream_position {} and last_event_date {}'.format(stream_position, last_event_date))
+    logger.info('Saving last stream_position {} and last_event_date {}'.format(stream_position, last_event_date))
     state_manager.post(str(stream_position) + ' ' + last_event_date)
 
 
@@ -190,7 +186,6 @@ class ExtendedEvents(Events):
 
 
 def get_events(config_dict, created_after=None, created_before=None, stream_position=0):
-    logging.getLogger().setLevel(logging.WARNING)
     limit = Max_Rows
     config = JWTAuth.from_settings_dictionary(config_dict)
     client = Client(config)
