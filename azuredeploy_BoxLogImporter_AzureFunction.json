@@ -164,7 +164,7 @@
                         "ClientSecret": "[parameters('ClientSecret')]",
                         "ClientId": "[parameters('ClientId')]",
                         "TenantId": "[parameters('TenantId')]",
-                        "WEBSITE_RUN_FROM_PACKAGE": "https://github.com/levi106/BoxLogImporter/releases/download/0.0.5/BoxLogImporter.zip"
+                        "WEBSITE_RUN_FROM_PACKAGE": "1"
                     }
                 }
             ]
