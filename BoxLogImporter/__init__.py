@@ -32,7 +32,7 @@ Max_Period_Minutes = os.environ.get('Max_Period_Minutes', 60)
 Max_Period_Minutes = int(Max_Period_Minutes)
 DryRun = os.environ.get('DryRun', 'True').lower() == 'true'
 # 1 度に取得する最大の行数 (既定値: 200)
-Max_Rows = os.environ.get('Max_Rows', 200)
+Max_Rows = int(os.environ.get('Max_Rows', 200))
 # 詳細のログを出力するかどうか (既定値: True)
 Verbose = os.environ.get('Verbose', 'True').lower() == 'true'
 
@@ -45,9 +45,9 @@ if not match:
     raise Exception("Invalid Log Analytics Uri.")
 
 # interval of script execution
-SCRIPT_EXECUTION_INTERVAL_MINUTES = os.environ.get('Script_Execution_Internal_Minutes', 10)
+SCRIPT_EXECUTION_INTERVAL_MINUTES = int(os.environ.get('Script_Execution_Internal_Minutes', 10))
 # max azure function lifetime
-AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES = os.environ.get('Azure_Func_Max_Execution_Time_Minutes', 6)
+AZURE_FUNC_MAX_EXECUTION_TIME_MINUTES = int(os.environ.get('Azure_Func_Max_Execution_Time_Minutes', 6))
 
 
 def main(mytimer: func.TimerRequest) -> None:
@@ -73,6 +73,7 @@ def process(config_dict: Any) -> bool:
     file_storage_connection_string = os.environ['AzureWebJobsStorage']
     state_manager = StateManager(connection_string=file_storage_connection_string)
 
+    # ストレージ アカウントに保存された、前回の取得位置を取得
     stream_position, created_after = get_stream_pos_and_date_from(
         marker=state_manager.get()
     )
@@ -102,18 +103,28 @@ def process(config_dict: Any) -> bool:
     with sentinel:
         reservoir = []
         reservoir_match_count = 0
-        missing_ids = []
         last_event_date = None
-        for events, stream_position in get_events(config_dict, created_after=created_after, created_before=created_before, stream_position=stream_position):
+        next_stream_position = 0
+        skipped = False
+        for i, (events, next_stream_position) in enumerate(get_events(config_dict, created_after=created_after, created_before=created_before, stream_position=stream_position)):
+            missing_ids = []
             for event in events:
                 found = False
-                for i, row in enumerate(results):
+                event_date = datetime.datetime.fromisoformat(event['created_at'])
+                if event_date > created_before:
+                    logging.info('skipped event_id: {}, created_at: {} > created_before: {}'.format(event['event_id'], event['created_at'], created_before))
+                    skipped = True
+                    continue
+                elif event_date < created_after:
+                    logging.info('skipped event_id: {}, created_at: {} < created_after'.format(event['event_id'], event['created_at'], created_after))
+                    skipped = True
+                for j, row in enumerate(results):
                     if row[2] == event['event_id']:
                         found = True
-                        if i != 0:
-                            logging.info('copy {} rows to reservoir'.format(i))
-                            reservoir += results[:i]
-                        results = results[i + 1:]
+                        if j != 0:
+                            logging.info('copy {} rows to reservoir'.format(j))
+                            reservoir += results[:j]
+                        results = results[j + 1:]
                         break
                 for row in reservoir:
                     if row[2] == event['event_id']:
@@ -128,32 +139,34 @@ def process(config_dict: Any) -> bool:
 
             logging.getLogger().setLevel(logging.INFO)
             last_event_date = events[-1]['created_at'] if events else last_event_date
-            logging.info('Processed {} events. Last event date: {}. {} events are not found in LA.'.format(len(events), last_event_date, len(missing_ids)))
+            logging.info('[{}] Processed {} events. next_stream_position: {}, Last event date: {}. {} events are not found in LA.'.format(i, len(events), next_stream_position, last_event_date, len(missing_ids)))
 
         if Verbose:
             logging.info('reservoir length: {}, reservoir_match_count: {}'.format(len(reservoir), reservoir_match_count))
 
-    if last_event_date:
-        save_marker(state_manager, stream_position, last_event_date)
-    elif created_before:
-        save_marker(state_manager, stream_position, str(created_before))
+        if skipped:
+            save_marker(state_manager, 0, str(created_before))
+        elif last_event_date:
+            save_marker(state_manager, next_stream_position, last_event_date)
+        elif created_before:
+            save_marker(state_manager, next_stream_position, str(created_before))
 
     return True
 
 
-def get_stream_pos_and_date_from(marker: StateManager) -> Tuple[int, datetime.datetime]:
+def get_stream_pos_and_date_from(marker: str) -> Tuple[int, datetime.datetime]:
     def get_default_date_from() -> datetime.datetime:
         date_from = datetime.datetime.utcnow() - datetime.timedelta(minutes=Historical_Data_Days * 24 * 60)
         date_from = date_from.replace(tzinfo=datetime.timezone.utc, second=0, microsecond=0)
         return date_from
 
-    def get_token_from_maker(marker: StateManager) -> Tuple[str, datetime.datetime]:
+    def get_token_from_maker(marker: str) -> Tuple[str, datetime.datetime]:
         # ストレージアカウントの保存されたトークンと日付を取得
         token = 0
         last_event_date = None
         try:
             token, last_event_date = marker.split(' ', 1)
-            last_event_date = parse_date(last_event_date).replace(tzinfo=datetime.timezone.utc)
+            last_event_date = parse_date(last_event_date).astimezone(datetime.timezone.utc)
         except Exception:
             pass
         return token, last_event_date
@@ -172,33 +185,19 @@ def save_marker(state_manager: StateManager, stream_position: int, last_event_da
     logging.info('Saving last stream_position {} and last_event_date {}'.format(stream_position, last_event_date))
     state_manager.post(str(stream_position) + ' ' + last_event_date)
 
-
-class ExtendedEvents(Events):
-    def get_events(self, stream_position=0, stream_type=EnterpriseEventsStreamType.ADMIN_LOGS, created_after=None, created_before=None, limit=100):
-        url = self.get_url()
-        params = {
-            'limit': limit,
-            'stream_position': stream_position,
-            'stream_type': stream_type,
-            'created_after': created_after,
-            'created_before': created_before
-        }
-        box_response = self._session.get(url, params=params)
-        response = box_response.json().copy()
-        return self.translator.translate(self._session, response_object=response)
-
-
 def get_events(config_dict, created_after=None, created_before=None, stream_position=0):
     logging.getLogger().setLevel(logging.WARNING)
     limit = Max_Rows
     config = JWTAuth.from_settings_dictionary(config_dict)
     client = Client(config)
-    events_client = ExtendedEvents(client._session)
+    events_client = client.events()
 
     while True:
-        res = events_client.get_events(stream_position=stream_position, created_after=created_after, created_before=created_before, limit=limit)
+        res = events_client.get_admin_events(stream_position=stream_position, created_after=created_after, created_before=created_before, limit=limit)
         stream_position = res['next_stream_position']
         events = [event.response_object for event in res['entries']]
-        yield events, stream_position
         if len(events) < limit:
+            stream_position = 0
+        yield events, stream_position
+        if stream_position == 0:
             break
